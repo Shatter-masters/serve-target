@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 /*  matches — the device is the working copy, not the archive.         */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 const MIN_N = 4;
 const CUR_KEY = "servetarget:current";
 const ARCHIVE_KEY = "servetarget:archive";
@@ -102,9 +102,9 @@ function writeKey(key, obj) {
 
 /* ---------------------------- export ----------------------------- */
 
-function tryDownload(text, filename) {
+function tryDownload(text, filename, type = "text/csv;charset=utf-8") {
   try {
-    const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([text], { type });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -368,6 +368,114 @@ function ImageSheet({ dataUrl, blob, filename, onClose }) {
   );
 }
 
+/* ------------------------ backup & restore ----------------------- */
+
+function BackupSheet({ text, filename, onClose }) {
+  const [msg, setMsg] = useState("");
+  const file = new File([text], filename, { type: "application/json" });
+  const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+
+  return (
+    <div className="fixed inset-0 bg-slate-950 bg-opacity-95 z-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-xl bg-slate-900 ring-1 ring-slate-700 rounded-lg p-5">
+        <div className="flex items-baseline justify-between mb-1">
+          <p className="text-[10px] tracking-[0.3em] text-blue-400 font-bold">BACKUP EVERYTHING</p>
+          <button onClick={onClose} className="text-slate-400 text-sm tracking-[0.2em] font-bold px-2">
+            CLOSE
+          </button>
+        </div>
+        <p className="text-slate-400 text-sm mb-4">
+          One file with every saved match and scout. AirDrop it to the other iPad or email it to yourself, then use <span className="text-white font-bold">RESTORE</span> on that device — it adds what's missing and never wipes anything.
+        </p>
+        <div className="flex gap-2 items-center flex-wrap">
+          {canShare && (
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.share({ files: [file] });
+                } catch {
+                  /* user cancelled */
+                }
+              }}
+              className="rounded bg-blue-600 font-black tracking-wide px-6 py-3 active:bg-blue-500"
+            >
+              SHARE FILE…
+            </button>
+          )}
+          <button
+            onClick={() => setMsg(tryDownload(text, filename, "application/json") ? "Download started — check your Files app." : "Download blocked — use Copy All.")}
+            className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700"
+          >
+            DOWNLOAD
+          </button>
+          <button
+            onClick={async () => setMsg((await copyText(text)) ? "Copied — paste it into an email or note." : "Couldn't copy here — use Download.")}
+            className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700"
+          >
+            COPY ALL
+          </button>
+        </div>
+        {msg && <p className="text-slate-400 text-sm mt-3">{msg}</p>}
+      </div>
+    </div>
+  );
+}
+
+function RestoreSheet({ onRestore, onClose }) {
+  const [msg, setMsg] = useState("");
+  const [buf, setBuf] = useState("");
+
+  return (
+    <div className="fixed inset-0 bg-slate-950 bg-opacity-95 z-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-xl bg-slate-900 ring-1 ring-slate-700 rounded-lg p-5 flex flex-col max-h-full">
+        <div className="flex items-baseline justify-between mb-1">
+          <p className="text-[10px] tracking-[0.3em] text-blue-400 font-bold">RESTORE FROM BACKUP</p>
+          <button onClick={onClose} className="text-slate-400 text-sm tracking-[0.2em] font-bold px-2">
+            CLOSE
+          </button>
+        </div>
+        <p className="text-slate-400 text-sm mb-4">
+          Pick a backup file, or paste one you copied. Matches get <span className="text-white font-bold">added</span> to what's on this device — nothing here gets deleted or overwritten.
+        </p>
+        <label className="rounded bg-blue-600 font-black tracking-wide px-6 py-3 active:bg-blue-500 text-center cursor-pointer mb-3">
+          CHOOSE BACKUP FILE
+          <input
+            type="file"
+            accept=".json,application/json,.txt,text/plain"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files && e.target.files[0];
+              if (!f) return;
+              try {
+                setMsg(onRestore(await f.text()));
+              } catch {
+                setMsg("Couldn't read that file.");
+              }
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <textarea
+          value={buf}
+          onChange={(e) => setBuf(e.target.value)}
+          placeholder='Or paste the backup text here — it starts with {"app":"serve-target"…'
+          className="w-full min-h-[6rem] bg-slate-950 ring-1 ring-slate-700 rounded p-3 font-mono text-xs text-slate-300 mb-3 resize-none"
+        />
+        <div className="flex gap-2 items-center flex-wrap">
+          <button
+            onClick={() => buf.trim() && setMsg(onRestore(buf))}
+            disabled={!buf.trim()}
+            className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700 disabled:opacity-30"
+          >
+            RESTORE PASTED TEXT
+          </button>
+          {msg && <p className="text-slate-400 text-sm">{msg}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------- number keypad ------------------------- */
 
 function Keypad({ title, hint, chips, onAdd, onRemove, onClose, onPick, pickMode }) {
@@ -530,6 +638,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
 
   const [opponent, setOpponent] = useState("");
+  const [vsTeam, setVsTeam] = useState("");
   const [matchType, setMatchType] = useState("match");
   const [live, setLive] = useState(false);
   const [receivers, setReceivers] = useState([]);
@@ -546,6 +655,10 @@ export default function App() {
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [exporting, setExporting] = useState(null);
   const [sharing, setSharing] = useState(null);
+  const [renaming, setRenaming] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [backupText, setBackupText] = useState(null);
 
   function openImageShare({ title, subtitle, serves: list, receivers: recs, targetJersey, filename }) {
     const stats = statsFor(list, recs);
@@ -560,7 +673,7 @@ export default function App() {
   const dirty = useRef(false);
   const latest = useRef({});
 
-  latest.current = { opponent, matchType, live, receivers, servers, currentServer, serves, currentSet, startedAt };
+  latest.current = { opponent, vsTeam, matchType, live, receivers, servers, currentServer, serves, currentSet, startedAt };
 
   useEffect(() => {
     if (!hasStorage()) setStorageOff(true);
@@ -572,6 +685,7 @@ export default function App() {
     const c = readKey(CUR_KEY);
     if (c && (c.live || (c.receivers && c.receivers.length))) {
       setOpponent(c.opponent || "");
+      setVsTeam(c.vsTeam || "");
       setMatchType(c.matchType || "match");
       setLive(true);
       setReceivers(c.receivers || []);
@@ -588,7 +702,7 @@ export default function App() {
     if (!loaded) return;
     dirty.current = true;
     setSaveState((s) => (s === "failed" ? "failed" : "pending"));
-  }, [opponent, matchType, live, receivers, servers, currentServer, serves, currentSet, startedAt, loaded]);
+  }, [opponent, vsTeam, matchType, live, receivers, servers, currentServer, serves, currentSet, startedAt, loaded]);
 
   useEffect(() => {
     if (!loaded || storageOff) return;
@@ -646,6 +760,7 @@ export default function App() {
 
   function newMatch(type = "match") {
     setOpponent("");
+    setVsTeam("");
     setMatchType(type);
     setLive(false);
     setReceivers([]);
@@ -662,6 +777,7 @@ export default function App() {
     const record = {
       id: startedAt || new Date().toISOString(),
       opponent: opponent || (matchType === "scout" ? "Unnamed team" : "Unnamed opponent"),
+      vs: vsTeam.trim() || undefined,
       date: startedAt || new Date().toISOString(),
       type: matchType,
       receivers,
@@ -684,6 +800,7 @@ export default function App() {
     setConfirmFinish(false);
     if (ok) {
       setLive(false);
+      setVsTeam("");
       setServes([]);
       setReceivers([]);
       setServers([]);
@@ -692,6 +809,58 @@ export default function App() {
       setOpponent("");
       setScreen("home");
     }
+  }
+
+  function saveArchive(next) {
+    setArchive(next);
+    try {
+      writeKey(ARCHIVE_KEY, next);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function applyRename() {
+    const newName = renaming.name.trim();
+    if (!newName || !viewing) return;
+    const oldKey = viewing.opponent.trim().toLowerCase();
+    const newVs = renaming.vs.trim() || undefined;
+    const next = archive.map((m) => {
+      if (m.id === viewing.id) return { ...m, opponent: newName, vs: newVs };
+      if (renaming.all && m.opponent.trim().toLowerCase() === oldKey) return { ...m, opponent: newName };
+      return m;
+    });
+    saveArchive(next);
+    setViewing({ ...viewing, opponent: newName, vs: newVs });
+    setRenaming(null);
+  }
+
+  function deleteViewing() {
+    if (!viewing) return;
+    saveArchive(archive.filter((m) => m.id !== viewing.id));
+    setConfirmDelete(false);
+    setViewing(null);
+    setScreen("home");
+  }
+
+  function mergeBackup(text) {
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return "That doesn't look like a Serve Target backup file.";
+    }
+    const list = Array.isArray(data) ? data : data && Array.isArray(data.archive) ? data.archive : null;
+    if (!list) return "No matches found in that file.";
+    const valid = list.filter((m) => m && m.id && m.opponent && Array.isArray(m.serves) && Array.isArray(m.receivers));
+    if (!valid.length) return "No matches found in that file.";
+    const have = new Set(archive.map((m) => m.id));
+    const add = valid.filter((m) => !have.has(m.id));
+    if (!add.length) return `Nothing new — all ${valid.length} matches in that file are already on this device.`;
+    const next = [...add, ...archive].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 240);
+    if (!saveArchive(next)) return "Couldn't save — this browser is blocking storage.";
+    return `Added ${add.length} match${add.length === 1 ? "" : "es"}${valid.length > add.length ? ` (${valid.length - add.length} already here)` : ""}. All set.`;
   }
 
   const priorMeetings = useMemo(
@@ -834,6 +1003,7 @@ export default function App() {
                     {m.type === "scout" && <span className="ml-2 align-middle text-[9px] tracking-[0.2em] font-black bg-purple-700 text-white rounded px-1.5 py-0.5">SCOUT</span>}
                   </p>
                   <p className="text-xs font-mono text-slate-500">
+                    {m.vs ? `vs ${m.vs} · ` : ""}
                     {prettyDate(m.date)} · {m.sets} sets · {m.serves.length} serves
                   </p>
                 </div>
@@ -850,26 +1020,41 @@ export default function App() {
           })}
         </div>
 
-        {archive.length > 0 && (
-          <button
-            onClick={() =>
-              setExporting({
-                title: "WHOLE SEASON",
-                filename: "serve-receive-season.csv",
-                text: [
-                  "opponent,date,type,set,our_server,their_passer,rating",
-                  ...archive.flatMap((m) => m.serves.map((s) => `"${m.opponent}",${m.date.slice(0, 10)},${m.type || "match"},${s.set},${s.server ?? ""},${s.passer ?? ""},${s.rating}`)),
-                ].join("\n"),
-              })
-            }
-            className="mt-6 rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700"
-          >
-            EXPORT WHOLE SEASON
+        <div className="mt-6 flex gap-2 flex-wrap">
+          {archive.length > 0 && (
+            <button
+              onClick={() =>
+                setExporting({
+                  title: "WHOLE SEASON",
+                  filename: "serve-receive-season.csv",
+                  text: [
+                    "opponent,date,type,set,our_server,their_passer,rating",
+                    ...archive.flatMap((m) => m.serves.map((s) => `"${m.opponent}",${m.date.slice(0, 10)},${m.type || "match"},${s.set},${s.server ?? ""},${s.passer ?? ""},${s.rating}`)),
+                  ].join("\n"),
+                })
+              }
+              className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700"
+            >
+              EXPORT WHOLE SEASON
+            </button>
+          )}
+          {archive.length > 0 && (
+            <button
+              onClick={() => setBackupText(JSON.stringify({ app: "serve-target", version: APP_VERSION, exportedAt: new Date().toISOString(), archive }))}
+              className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700"
+            >
+              BACKUP
+            </button>
+          )}
+          <button onClick={() => setRestoreOpen(true)} className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700">
+            RESTORE
           </button>
-        )}
+        </div>
 
         <p className="text-slate-700 text-xs font-mono mt-10">Serve Target v{APP_VERSION} · data lives on this device — export after matches</p>
         {exportSheet}
+        {backupText && <BackupSheet text={backupText} filename={`serve-target-backup-${new Date().toISOString().slice(0, 10)}.json`} onClose={() => setBackupText(null)} />}
+        {restoreOpen && <RestoreSheet onRestore={mergeBackup} onClose={() => setRestoreOpen(false)} />}
       </div>
     );
   }
@@ -898,7 +1083,7 @@ export default function App() {
             <p className="text-xs font-mono text-slate-500">
               {combined
                 ? `${related.length} meetings · ${rServes.length} serves total`
-                : `${prettyDate(viewing.date)} · ${viewing.sets} sets · ${viewing.serves.length} serves`}
+                : `${viewing.vs ? `vs ${viewing.vs} · ` : ""}${prettyDate(viewing.date)} · ${viewing.sets} sets · ${viewing.serves.length} serves`}
             </p>
           </div>
           <button
@@ -967,7 +1152,7 @@ export default function App() {
                 {related
                   .slice()
                   .sort((a, b) => new Date(a.date) - new Date(b.date))
-                  .map((m) => `${prettyDate(m.date)}${m.type === "scout" ? " (scout)" : ""}`)
+                  .map((m) => `${prettyDate(m.date)}${m.type === "scout" ? ` (scout${m.vs ? ` vs ${m.vs}` : ""})` : ""}`)
                   .join(" · ")}
               </p>
             )}
@@ -981,6 +1166,85 @@ export default function App() {
           targetJersey={top && top.jersey}
           note={combined ? "Every meeting combined — the fullest read on them you have." : "Full match. Red is a passer breaking down."}
         />
+
+        <div className="px-4 pb-8 flex gap-2 flex-wrap">
+          <button
+            onClick={() => setRenaming({ name: viewing.opponent, vs: viewing.vs || "", all: related.length > 1 })}
+            className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-5 py-2.5 text-sm text-slate-300 active:bg-slate-700"
+          >
+            RENAME
+          </button>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-5 py-2.5 text-sm text-red-400 active:bg-slate-700"
+          >
+            DELETE
+          </button>
+        </div>
+
+        {renaming && (
+          <div className="fixed inset-0 bg-slate-950 bg-opacity-90 z-50 flex items-center justify-center p-6">
+            <div className="w-full max-w-md bg-slate-900 ring-1 ring-slate-700 rounded-lg p-6">
+              <p className="text-2xl font-black mb-4">Rename</p>
+              <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">TEAM NAME</p>
+              <input
+                value={renaming.name}
+                onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
+                className="w-full bg-slate-800 ring-1 ring-slate-600 rounded px-4 py-3 text-xl mb-4 focus:outline-none focus:ring-blue-500"
+              />
+              {viewing.type === "scout" && (
+                <>
+                  <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">WHO THEY WERE PLAYING — OPTIONAL</p>
+                  <input
+                    value={renaming.vs}
+                    onChange={(e) => setRenaming({ ...renaming, vs: e.target.value })}
+                    placeholder="Norwell"
+                    className="w-full bg-slate-800 ring-1 ring-slate-600 rounded px-4 py-3 text-xl mb-4 focus:outline-none focus:ring-blue-500"
+                  />
+                </>
+              )}
+              {related.length > 1 && (
+                <button
+                  onClick={() => setRenaming({ ...renaming, all: !renaming.all })}
+                  className="w-full text-left rounded bg-slate-950 ring-1 ring-slate-700 p-3 mb-4 active:bg-slate-800 flex items-center gap-3"
+                >
+                  <span className={`w-6 h-6 rounded shrink-0 flex items-center justify-center font-black ${renaming.all ? "bg-blue-600 text-white" : "bg-slate-800 ring-1 ring-slate-600 text-transparent"}`}>✓</span>
+                  <span className="text-sm text-slate-300">
+                    Rename all {related.length} records of <span className="font-bold text-white">{viewing.opponent}</span> so they stay combined
+                  </span>
+                </button>
+              )}
+              <div className="flex gap-2">
+                <button onClick={applyRename} disabled={!renaming.name.trim()} className="flex-1 rounded bg-blue-600 font-black tracking-wide py-4 active:bg-blue-500 disabled:opacity-30">
+                  SAVE
+                </button>
+                <button onClick={() => setRenaming(null)} className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 active:bg-slate-700">
+                  CANCEL
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmDelete && (
+          <div className="fixed inset-0 bg-slate-950 bg-opacity-90 z-50 flex items-center justify-center p-6">
+            <div className="w-full max-w-md bg-slate-900 ring-1 ring-slate-700 rounded-lg p-6">
+              <p className="text-2xl font-black mb-2">Delete this record?</p>
+              <p className="text-slate-400 mb-6">
+                {viewing.opponent} — {prettyDate(viewing.date)}, {viewing.serves.length} serves. This can't be undone. Other records against them are untouched.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={deleteViewing} className="flex-1 rounded bg-red-600 font-black tracking-wide py-4 active:bg-red-500">
+                  DELETE IT
+                </button>
+                <button onClick={() => setConfirmDelete(false)} className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 active:bg-slate-700">
+                  KEEP IT
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {exportSheet}
         {imageSheet}
       </div>
@@ -1008,6 +1272,19 @@ export default function App() {
           placeholder="Adams Central"
           className="w-full bg-slate-800 ring-1 ring-slate-600 rounded px-4 py-4 text-2xl mb-3 focus:outline-none focus:ring-blue-500"
         />
+
+        {matchType === "scout" && (
+          <>
+            <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">WHO THEY'RE PLAYING — OPTIONAL</p>
+            <input
+              value={vsTeam}
+              onChange={(e) => setVsTeam(e.target.value)}
+              placeholder="Norwell"
+              className="w-full bg-slate-800 ring-1 ring-slate-600 rounded px-4 py-3 text-xl mb-1 focus:outline-none focus:ring-blue-500"
+            />
+            <p className="text-slate-500 text-sm mb-3">Just a label for your records — combining and game-day carryover only look at the team you're scouting.</p>
+          </>
+        )}
 
         {priorPassers.length > 0 && (
           <div className="rounded bg-slate-950 ring-1 ring-blue-500 p-4 mb-6">
@@ -1092,7 +1369,10 @@ export default function App() {
         <div className="px-4 py-2 flex-1 min-w-0">
           <div className="flex items-center gap-3">
             {matchType === "scout" && <span className="text-[9px] tracking-[0.2em] font-black bg-purple-700 text-white rounded px-1.5 py-0.5 shrink-0">SCOUT</span>}
-            <p className="text-blue-400 text-[10px] tracking-[0.3em] font-bold truncate">{(opponent || (matchType === "scout" ? "SCOUTING" : "OPPONENT")).toUpperCase()}</p>
+            <p className="text-blue-400 text-[10px] tracking-[0.3em] font-bold truncate">
+              {(opponent || (matchType === "scout" ? "SCOUTING" : "OPPONENT")).toUpperCase()}
+              {matchType === "scout" && vsTeam.trim() && <span className="text-slate-500"> VS {vsTeam.trim().toUpperCase()}</span>}
+            </p>
             <SaveDot />
           </div>
           <p className="text-base font-black tracking-tight truncate">
