@@ -11,13 +11,20 @@ scouting carryover, CSV export.
 
 Open the printed URL. Data is stored in the browser's localStorage.
 
-## Deploy (free, Cloudflare Pages)
+## Deploy (free, GitHub Pages)
 
-1. Push this folder to a GitHub repo.
-2. Cloudflare dashboard → Workers & Pages → Create → Pages → connect the repo.
-3. Build command: `npm run build` — Output directory: `dist`.
-4. Every push to `main` deploys automatically. Use a branch + its preview URL
-   to test changes on the actual iPad before merging.
+Live at: https://shatter-masters.github.io/serve-target/
+
+Source repo: https://github.com/Shatter-masters/serve-target
+
+To publish changes:
+
+    npm run deploy
+
+That builds the app and pushes it to the `gh-pages` branch, which GitHub
+Pages serves. Commit and `git push` to `main` separately to keep the source
+history. Don't deploy on game day; the iPads pick up the new version on
+next launch with internet.
 
 ## Put it on the iPad
 
