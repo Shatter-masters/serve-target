@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 /*  matches — the device is the working copy, not the archive.         */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const MIN_N = 4;
 const CUR_KEY = "servetarget:current";
 const ARCHIVE_KEY = "servetarget:archive";
@@ -348,6 +348,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
 
   const [opponent, setOpponent] = useState("");
+  const [matchType, setMatchType] = useState("match");
   const [receivers, setReceivers] = useState([]);
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
@@ -367,7 +368,7 @@ export default function App() {
   const dirty = useRef(false);
   const latest = useRef({});
 
-  latest.current = { opponent, receivers, servers, currentServer, serves, currentSet, startedAt };
+  latest.current = { opponent, matchType, receivers, servers, currentServer, serves, currentSet, startedAt };
 
   useEffect(() => {
     if (!hasStorage()) setStorageOff(true);
@@ -379,6 +380,7 @@ export default function App() {
     const c = readKey(CUR_KEY);
     if (c && c.receivers && c.receivers.length) {
       setOpponent(c.opponent || "");
+      setMatchType(c.matchType || "match");
       setReceivers(c.receivers);
       setServers(c.servers || []);
       setCurrentServer(c.currentServer ?? null);
@@ -393,7 +395,7 @@ export default function App() {
     if (!loaded) return;
     dirty.current = true;
     setSaveState((s) => (s === "failed" ? "failed" : "pending"));
-  }, [opponent, receivers, servers, currentServer, serves, currentSet, startedAt, loaded]);
+  }, [opponent, matchType, receivers, servers, currentServer, serves, currentSet, startedAt, loaded]);
 
   useEffect(() => {
     if (!loaded || storageOff) return;
@@ -449,8 +451,9 @@ export default function App() {
 
   const undo = () => setServes((s) => s.slice(0, -1));
 
-  function newMatch() {
+  function newMatch(type = "match") {
     setOpponent("");
+    setMatchType(type);
     setReceivers([]);
     setServers([]);
     setCurrentServer(null);
@@ -464,8 +467,9 @@ export default function App() {
   function finishMatch() {
     const record = {
       id: startedAt || new Date().toISOString(),
-      opponent: opponent || "Unnamed opponent",
+      opponent: opponent || (matchType === "scout" ? "Unnamed team" : "Unnamed opponent"),
       date: startedAt || new Date().toISOString(),
+      type: matchType,
       receivers,
       servers,
       serves,
@@ -592,18 +596,26 @@ export default function App() {
         )}
 
         {receivers.length > 0 && (
-          <button onClick={() => setScreen("match")} className="w-full text-left rounded bg-blue-600 p-4 mb-3 active:bg-blue-500">
-            <p className="text-[10px] tracking-[0.3em] font-black">IN PROGRESS</p>
+          <button onClick={() => setScreen("match")} className={`w-full text-left rounded p-4 mb-3 ${matchType === "scout" ? "bg-purple-700 active:bg-purple-600" : "bg-blue-600 active:bg-blue-500"}`}>
+            <p className="text-[10px] tracking-[0.3em] font-black">{matchType === "scout" ? "SCOUTING IN PROGRESS" : "IN PROGRESS"}</p>
             <p className="text-2xl font-black">{opponent || "Unnamed opponent"}</p>
-            <p className="text-sm font-mono text-blue-100">
+            <p className={`text-sm font-mono ${matchType === "scout" ? "text-purple-200" : "text-blue-100"}`}>
               Set {currentSet} · {serves.length} serves logged — tap to resume
             </p>
           </button>
         )}
 
-        <button onClick={newMatch} className="w-full rounded bg-blue-600 text-xl font-black tracking-wide py-5 mb-8 active:bg-blue-500">
-          NEW MATCH
-        </button>
+        <div className="flex gap-3 mb-8">
+          <button onClick={() => newMatch()} className="flex-1 rounded bg-blue-600 text-xl font-black tracking-wide py-5 active:bg-blue-500">
+            NEW MATCH
+          </button>
+          <button onClick={() => newMatch("scout")} className="flex-1 rounded bg-purple-700 text-xl font-black tracking-wide py-5 active:bg-purple-600">
+            SCOUT A TEAM
+          </button>
+        </div>
+        <p className="text-slate-500 text-sm -mt-6 mb-8">
+          Scout while watching a team play someone else. When you face them later, their passers and grades load in automatically.
+        </p>
 
         <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-3">SAVED MATCHES</p>
         {archive.length === 0 && <p className="text-slate-600">Nothing saved yet. Finish a match and it lands here.</p>}
@@ -620,7 +632,10 @@ export default function App() {
                 className="w-full text-left rounded bg-slate-950 p-3 flex items-center gap-4 active:bg-slate-800"
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-xl font-black truncate">{m.opponent}</p>
+                  <p className="text-xl font-black truncate">
+                    {m.opponent}
+                    {m.type === "scout" && <span className="ml-2 align-middle text-[9px] tracking-[0.2em] font-black bg-purple-700 text-white rounded px-1.5 py-0.5">SCOUT</span>}
+                  </p>
                   <p className="text-xs font-mono text-slate-500">
                     {prettyDate(m.date)} · {m.sets} sets · {m.serves.length} serves
                   </p>
@@ -645,8 +660,8 @@ export default function App() {
                 title: "WHOLE SEASON",
                 filename: "serve-receive-season.csv",
                 text: [
-                  "opponent,date,set,our_server,their_passer,rating",
-                  ...archive.flatMap((m) => m.serves.map((s) => `"${m.opponent}",${m.date.slice(0, 10)},${s.set},${s.server ?? ""},${s.passer ?? ""},${s.rating}`)),
+                  "opponent,date,type,set,our_server,their_passer,rating",
+                  ...archive.flatMap((m) => m.serves.map((s) => `"${m.opponent}",${m.date.slice(0, 10)},${m.type || "match"},${s.set},${s.server ?? ""},${s.passer ?? ""},${s.rating}`)),
                 ].join("\n"),
               })
             }
@@ -673,7 +688,10 @@ export default function App() {
             ← BACK
           </button>
           <div className="flex-1 min-w-0">
-            <p className="text-2xl font-black truncate">{viewing.opponent}</p>
+            <p className="text-2xl font-black truncate">
+              {viewing.opponent}
+              {viewing.type === "scout" && <span className="ml-2 align-middle text-[9px] tracking-[0.2em] font-black bg-purple-700 text-white rounded px-1.5 py-0.5">SCOUT</span>}
+            </p>
             <p className="text-xs font-mono text-slate-500">
               {prettyDate(viewing.date)} · {viewing.sets} sets · {viewing.serves.length} serves
             </p>
@@ -705,9 +723,13 @@ export default function App() {
         <button onClick={() => setScreen("home")} className="text-slate-400 font-black tracking-wide mb-4 active:text-white">
           ← BACK
         </button>
-        <h1 className="text-4xl font-black tracking-tight mb-8">New match</h1>
+        <h1 className="text-4xl font-black tracking-tight mb-2">{matchType === "scout" ? "Scout a team" : "New match"}</h1>
+        {matchType === "scout" && (
+          <p className="text-slate-400 mb-6">Watching them play someone else. Name them exactly how you'll name them on game day so the grades carry over.</p>
+        )}
+        {matchType !== "scout" && <div className="mb-6" />}
 
-        <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">OPPONENT</p>
+        <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">{matchType === "scout" ? "TEAM YOU'RE SCOUTING" : "OPPONENT"}</p>
         <input
           value={opponent}
           onChange={(e) => setOpponent(e.target.value)}
@@ -718,7 +740,14 @@ export default function App() {
         {priorPassers.length > 0 && (
           <div className="rounded bg-slate-950 ring-1 ring-blue-500 p-4 mb-6">
             <p className="text-[10px] tracking-[0.3em] text-blue-400 font-bold mb-2">
-              YOU'VE PLAYED THEM {priorMeetings.length} TIME{priorMeetings.length === 1 ? "" : "S"}
+              {(() => {
+                const played = priorMeetings.filter((m) => m.type !== "scout").length;
+                const scouted = priorMeetings.length - played;
+                const parts = [];
+                if (played) parts.push(`PLAYED THEM ${played} TIME${played === 1 ? "" : "S"}`);
+                if (scouted) parts.push(`SCOUTED THEM ${scouted} TIME${scouted === 1 ? "" : "S"}`);
+                return `YOU'VE ${parts.join(" · ")}`;
+              })()}
             </p>
             <div className="flex flex-wrap gap-4 mb-3">
               {priorPassers.map((p) => (
@@ -748,25 +777,29 @@ export default function App() {
         </div>
         <p className="text-slate-400 text-sm mb-8">Libero and both pin passers. Three or four keeps the grid fast.</p>
 
-        <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">OUR SERVERS — OPTIONAL</p>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {servers.map((j) => (
-            <span key={j} className="h-14 min-w-[4rem] px-4 rounded flex items-center justify-center text-2xl font-black font-mono bg-slate-800 ring-1 ring-slate-600">
-              {j}
-            </span>
-          ))}
-          <button onClick={() => setSheet("servers")} className="h-14 px-5 rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide active:bg-slate-700">
-            {servers.length ? "EDIT" : "ADD NUMBERS"}
-          </button>
-        </div>
-        <p className="text-slate-400 text-sm mb-8">Add these to see which of your servers is actually breaking them.</p>
+        {matchType !== "scout" && (
+          <>
+            <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">OUR SERVERS — OPTIONAL</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {servers.map((j) => (
+                <span key={j} className="h-14 min-w-[4rem] px-4 rounded flex items-center justify-center text-2xl font-black font-mono bg-slate-800 ring-1 ring-slate-600">
+                  {j}
+                </span>
+              ))}
+              <button onClick={() => setSheet("servers")} className="h-14 px-5 rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide active:bg-slate-700">
+                {servers.length ? "EDIT" : "ADD NUMBERS"}
+              </button>
+            </div>
+            <p className="text-slate-400 text-sm mb-8">Add these to see which of your servers is actually breaking them.</p>
+          </>
+        )}
 
         <button
           onClick={() => receivers.length && setScreen("match")}
           disabled={!receivers.length}
-          className="w-full rounded bg-blue-600 text-xl font-black tracking-wide py-5 disabled:opacity-30 active:bg-blue-500"
+          className={`w-full rounded text-xl font-black tracking-wide py-5 disabled:opacity-30 ${matchType === "scout" ? "bg-purple-700 active:bg-purple-600" : "bg-blue-600 active:bg-blue-500"}`}
         >
-          START TRACKING
+          {matchType === "scout" ? "START SCOUTING" : "START TRACKING"}
         </button>
 
         {sheet === "receivers" && <Keypad title="THEIR PASSERS" hint="Tap a number to remove it." chips={receivers} onAdd={addTo(setReceivers)} onRemove={removeFrom(setReceivers)} onClose={() => setSheet(null)} />}
@@ -785,19 +818,22 @@ export default function App() {
         </button>
         <div className="px-4 py-2 flex-1 min-w-0">
           <div className="flex items-center gap-3">
-            <p className="text-blue-400 text-[10px] tracking-[0.3em] font-bold truncate">{(opponent || "OPPONENT").toUpperCase()}</p>
+            {matchType === "scout" && <span className="text-[9px] tracking-[0.2em] font-black bg-purple-700 text-white rounded px-1.5 py-0.5 shrink-0">SCOUT</span>}
+            <p className="text-blue-400 text-[10px] tracking-[0.3em] font-bold truncate">{(opponent || (matchType === "scout" ? "SCOUTING" : "OPPONENT")).toUpperCase()}</p>
             <SaveDot />
           </div>
           <p className="text-base font-black tracking-tight truncate">
             SET {currentSet} · {pool.length} SERVES
           </p>
         </div>
-        <button onClick={() => setSheet("pickServer")} className="px-6 border-l border-slate-700 text-center active:bg-slate-800">
-          <p className="text-[10px] tracking-[0.2em] text-slate-400 font-bold">SERVING</p>
-          <p className="text-2xl font-black font-mono text-blue-400 leading-none">
-            {currentServer ? `#${currentServer}` : <span className="text-slate-600 text-base font-sans">SET</span>}
-          </p>
-        </button>
+        {matchType !== "scout" && (
+          <button onClick={() => setSheet("pickServer")} className="px-6 border-l border-slate-700 text-center active:bg-slate-800">
+            <p className="text-[10px] tracking-[0.2em] text-slate-400 font-bold">SERVING</p>
+            <p className="text-2xl font-black font-mono text-blue-400 leading-none">
+              {currentServer ? `#${currentServer}` : <span className="text-slate-600 text-base font-sans">SET</span>}
+            </p>
+          </button>
+        )}
         <button onClick={() => setSheet("receivers")} className="px-5 border-l border-slate-700 text-center active:bg-slate-800">
           <p className="text-[10px] tracking-[0.2em] text-slate-400 font-bold">THEIR</p>
           <p className="text-lg font-black leading-none">SUB</p>
@@ -860,7 +896,7 @@ export default function App() {
 
           <div className="flex gap-2 mt-2 shrink-0">
             <button onClick={() => log(null, "err")} className="w-56 h-14 rounded bg-slate-950 ring-1 ring-slate-700 text-slate-400 font-black tracking-[0.2em] text-sm active:bg-slate-700 active:text-white">
-              OUR SERVE ERROR {ourErrors > 0 && <span className="font-mono ml-1">{ourErrors}</span>}
+              {matchType === "scout" ? "MISSED SERVE" : "OUR SERVE ERROR"} {ourErrors > 0 && <span className="font-mono ml-1">{ourErrors}</span>}
             </button>
             <div className="flex-1 h-14 rounded bg-slate-950 flex items-center px-4 gap-4 overflow-hidden">
               {flash ? (
@@ -938,9 +974,10 @@ export default function App() {
       {confirmFinish && (
         <div className="fixed inset-0 bg-slate-950 bg-opacity-90 z-50 flex items-center justify-center p-6">
           <div className="w-full max-w-md bg-slate-900 ring-1 ring-slate-700 rounded-lg p-6">
-            <p className="text-2xl font-black mb-2">Save this match?</p>
+            <p className="text-2xl font-black mb-2">{matchType === "scout" ? "Save this scouting report?" : "Save this match?"}</p>
             <p className="text-slate-400 mb-6">
-              {opponent || "Unnamed opponent"} — {currentSet} set{currentSet === 1 ? "" : "s"}, {serves.length} serves. It moves to your saved matches and the tracker clears for the next one.
+              {opponent || "Unnamed opponent"} — {currentSet} set{currentSet === 1 ? "" : "s"}, {serves.length} serves.{" "}
+              {matchType === "scout" ? "When you play them, their passers and these grades load into match setup." : "It moves to your saved matches and the tracker clears for the next one."}
             </p>
             {saveState === "failed" && <p className="text-red-400 text-sm font-bold mb-4">Last save failed. Export first — closing now could lose this match.</p>}
             <div className="flex gap-2">
