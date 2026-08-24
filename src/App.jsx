@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 /*  matches — the device is the working copy, not the archive.         */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const MIN_N = 4;
 const CUR_KEY = "servetarget:current";
 const ARCHIVE_KEY = "servetarget:archive";
@@ -345,6 +345,7 @@ export default function App() {
   const [screen, setScreen] = useState("home");
   const [archive, setArchive] = useState([]);
   const [viewing, setViewing] = useState(null);
+  const [reportScope, setReportScope] = useState("one");
   const [loaded, setLoaded] = useState(false);
 
   const [opponent, setOpponent] = useState("");
@@ -631,6 +632,7 @@ export default function App() {
                 key={m.id}
                 onClick={() => {
                   setViewing(m);
+                  setReportScope("one");
                   setScreen("report");
                 }}
                 className="w-full text-left rounded bg-slate-950 p-3 flex items-center gap-4 active:bg-slate-800"
@@ -684,7 +686,12 @@ export default function App() {
   /* ============================= REPORT ============================= */
 
   if (screen === "report" && viewing) {
-    const top = statsFor(viewing.serves, viewing.receivers).filter((p) => p.n >= MIN_N)[0];
+    const related = archive.filter((m) => m.opponent.trim().toLowerCase() === viewing.opponent.trim().toLowerCase());
+    const combined = reportScope === "all" && related.length > 1;
+    const rServes = combined ? related.flatMap((m) => m.serves) : viewing.serves;
+    const rReceivers = combined ? [...new Set(related.flatMap((m) => m.receivers))] : viewing.receivers;
+    const rServers = combined ? [...new Set(related.flatMap((m) => m.servers || []))] : viewing.servers || [];
+    const top = statsFor(rServes, rReceivers).filter((p) => p.n >= MIN_N)[0];
     return (
       <div className="min-h-screen bg-slate-900 text-white overflow-auto">
         <div className="flex items-center gap-4 px-4 py-3 bg-slate-950 border-b border-slate-700">
@@ -694,26 +701,78 @@ export default function App() {
           <div className="flex-1 min-w-0">
             <p className="text-2xl font-black truncate">
               {viewing.opponent}
-              {viewing.type === "scout" && <span className="ml-2 align-middle text-[9px] tracking-[0.2em] font-black bg-purple-700 text-white rounded px-1.5 py-0.5">SCOUT</span>}
+              {!combined && viewing.type === "scout" && <span className="ml-2 align-middle text-[9px] tracking-[0.2em] font-black bg-purple-700 text-white rounded px-1.5 py-0.5">SCOUT</span>}
+              {combined && <span className="ml-2 align-middle text-[9px] tracking-[0.2em] font-black bg-blue-600 text-white rounded px-1.5 py-0.5">COMBINED</span>}
             </p>
             <p className="text-xs font-mono text-slate-500">
-              {prettyDate(viewing.date)} · {viewing.sets} sets · {viewing.serves.length} serves
+              {combined
+                ? `${related.length} meetings · ${rServes.length} serves total`
+                : `${prettyDate(viewing.date)} · ${viewing.sets} sets · ${viewing.serves.length} serves`}
             </p>
           </div>
           <button
             onClick={() =>
-              setExporting({
-                title: viewing.opponent.toUpperCase(),
-                filename: `serve-receive-${viewing.opponent.replace(/\s+/g, "-").toLowerCase()}.csv`,
-                text: matchCSV(viewing.opponent, viewing.serves),
-              })
+              setExporting(
+                combined
+                  ? {
+                      title: `${viewing.opponent.toUpperCase()} — ALL MEETINGS`,
+                      filename: `serve-receive-${viewing.opponent.replace(/\s+/g, "-").toLowerCase()}-combined.csv`,
+                      text: [
+                        "date,type,set,our_server,their_passer,rating",
+                        ...related.flatMap((m) => m.serves.map((s) => `${m.date.slice(0, 10)},${m.type || "match"},${s.set},${s.server ?? ""},${s.passer ?? ""},${s.rating}`)),
+                      ].join("\n"),
+                    }
+                  : {
+                      title: viewing.opponent.toUpperCase(),
+                      filename: `serve-receive-${viewing.opponent.replace(/\s+/g, "-").toLowerCase()}.csv`,
+                      text: matchCSV(viewing.opponent, viewing.serves),
+                    }
+              )
             }
             className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-4 py-2 text-sm active:bg-slate-700"
           >
             EXPORT
           </button>
         </div>
-        <PasserReport serves={viewing.serves} receivers={viewing.receivers} servers={viewing.servers || []} targetJersey={top && top.jersey} note="Full match. Red is a passer breaking down." />
+
+        {related.length > 1 && (
+          <div className="flex items-center gap-3 px-4 py-2 bg-slate-950 border-b border-slate-700">
+            <p className="text-[10px] tracking-[0.2em] text-slate-500 font-bold">
+              YOU'VE SEEN THEM {related.length} TIME{related.length === 1 ? "" : "S"}
+            </p>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setReportScope("one")}
+                className={`px-3 py-1.5 rounded text-[10px] tracking-[0.2em] font-bold ${!combined ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400"}`}
+              >
+                THIS ONE
+              </button>
+              <button
+                onClick={() => setReportScope("all")}
+                className={`px-3 py-1.5 rounded text-[10px] tracking-[0.2em] font-bold ${combined ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400"}`}
+              >
+                ALL {related.length} COMBINED
+              </button>
+            </div>
+            {combined && (
+              <p className="text-xs text-slate-500 truncate">
+                {related
+                  .slice()
+                  .sort((a, b) => new Date(a.date) - new Date(b.date))
+                  .map((m) => `${prettyDate(m.date)}${m.type === "scout" ? " (scout)" : ""}`)
+                  .join(" · ")}
+              </p>
+            )}
+          </div>
+        )}
+
+        <PasserReport
+          serves={rServes}
+          receivers={rReceivers}
+          servers={rServers}
+          targetJersey={top && top.jersey}
+          note={combined ? "Every meeting combined — the fullest read on them you have." : "Full match. Red is a passer breaking down."}
+        />
         {exportSheet}
       </div>
     );
