@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 /*  matches — the device is the working copy, not the archive.         */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const MIN_N = 4;
 const CUR_KEY = "servetarget:current";
 const ARCHIVE_KEY = "servetarget:archive";
@@ -349,6 +349,7 @@ export default function App() {
 
   const [opponent, setOpponent] = useState("");
   const [matchType, setMatchType] = useState("match");
+  const [live, setLive] = useState(false);
   const [receivers, setReceivers] = useState([]);
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
@@ -368,7 +369,7 @@ export default function App() {
   const dirty = useRef(false);
   const latest = useRef({});
 
-  latest.current = { opponent, matchType, receivers, servers, currentServer, serves, currentSet, startedAt };
+  latest.current = { opponent, matchType, live, receivers, servers, currentServer, serves, currentSet, startedAt };
 
   useEffect(() => {
     if (!hasStorage()) setStorageOff(true);
@@ -378,10 +379,11 @@ export default function App() {
     const a = readKey(ARCHIVE_KEY);
     if (Array.isArray(a)) setArchive(a);
     const c = readKey(CUR_KEY);
-    if (c && c.receivers && c.receivers.length) {
+    if (c && (c.live || (c.receivers && c.receivers.length))) {
       setOpponent(c.opponent || "");
       setMatchType(c.matchType || "match");
-      setReceivers(c.receivers);
+      setLive(true);
+      setReceivers(c.receivers || []);
       setServers(c.servers || []);
       setCurrentServer(c.currentServer ?? null);
       setServes(c.serves || []);
@@ -395,7 +397,7 @@ export default function App() {
     if (!loaded) return;
     dirty.current = true;
     setSaveState((s) => (s === "failed" ? "failed" : "pending"));
-  }, [opponent, matchType, receivers, servers, currentServer, serves, currentSet, startedAt, loaded]);
+  }, [opponent, matchType, live, receivers, servers, currentServer, serves, currentSet, startedAt, loaded]);
 
   useEffect(() => {
     if (!loaded || storageOff) return;
@@ -454,6 +456,7 @@ export default function App() {
   function newMatch(type = "match") {
     setOpponent("");
     setMatchType(type);
+    setLive(false);
     setReceivers([]);
     setServers([]);
     setCurrentServer(null);
@@ -489,6 +492,7 @@ export default function App() {
     }
     setConfirmFinish(false);
     if (ok) {
+      setLive(false);
       setServes([]);
       setReceivers([]);
       setServers([]);
@@ -595,7 +599,7 @@ export default function App() {
           </div>
         )}
 
-        {receivers.length > 0 && (
+        {live && (
           <button onClick={() => setScreen("match")} className={`w-full text-left rounded p-4 mb-3 ${matchType === "scout" ? "bg-purple-700 active:bg-purple-600" : "bg-blue-600 active:bg-blue-500"}`}>
             <p className="text-[10px] tracking-[0.3em] font-black">{matchType === "scout" ? "SCOUTING IN PROGRESS" : "IN PROGRESS"}</p>
             <p className="text-2xl font-black">{opponent || "Unnamed opponent"}</p>
@@ -764,7 +768,7 @@ export default function App() {
           </div>
         )}
 
-        <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">THEIR PASSERS</p>
+        <p className="text-[10px] tracking-[0.3em] text-slate-400 font-bold mb-2">THEIR PASSERS — OPTIONAL</p>
         <div className="flex flex-wrap gap-2 mb-3">
           {receivers.map((j) => (
             <span key={j} className="h-14 min-w-[4rem] px-4 rounded flex items-center justify-center text-2xl font-black font-mono bg-slate-800 ring-1 ring-slate-600">
@@ -775,7 +779,9 @@ export default function App() {
             {receivers.length ? "EDIT" : "ADD NUMBERS"}
           </button>
         </div>
-        <p className="text-slate-400 text-sm mb-8">Libero and both pin passers. Three or four keeps the grid fast.</p>
+        <p className="text-slate-400 text-sm mb-8">
+          Libero and both pin passers if you know them. Don't know numbers yet? Just start — add each jersey the first time she takes a serve.
+        </p>
 
         {matchType !== "scout" && (
           <>
@@ -795,9 +801,8 @@ export default function App() {
         )}
 
         <button
-          onClick={() => receivers.length && setScreen("match")}
-          disabled={!receivers.length}
-          className={`w-full rounded text-xl font-black tracking-wide py-5 disabled:opacity-30 ${matchType === "scout" ? "bg-purple-700 active:bg-purple-600" : "bg-blue-600 active:bg-blue-500"}`}
+          onClick={() => { setLive(true); setScreen("match"); }}
+          className={`w-full rounded text-xl font-black tracking-wide py-5 ${matchType === "scout" ? "bg-purple-700 active:bg-purple-600" : "bg-blue-600 active:bg-blue-500"}`}
         >
           {matchType === "scout" ? "START SCOUTING" : "START TRACKING"}
         </button>
@@ -867,6 +872,17 @@ export default function App() {
           </div>
 
           <div className="flex-1 flex flex-col gap-2 min-h-0">
+            {receivers.length === 0 && (
+              <button
+                onClick={() => setSheet("receivers")}
+                className="flex-1 rounded border-2 border-dashed border-slate-600 flex flex-col items-center justify-center gap-2 active:bg-slate-800"
+              >
+                <p className="text-3xl font-black tracking-tight">ADD A PASSER NUMBER</p>
+                <p className="text-slate-400 max-w-md">
+                  No roster needed — tap here the first time a jersey takes a serve, punch in her number, and she gets a row. Keep adding as you spot them.
+                </p>
+              </button>
+            )}
             {receivers.map((j) => {
               const a = liveAvg(j);
               const c = liveCounts[j] || { ace: 0, 1: 0, 2: 0, 3: 0 };
@@ -892,6 +908,14 @@ export default function App() {
                 </div>
               );
             })}
+            {receivers.length > 0 && receivers.length < 8 && (
+              <button
+                onClick={() => setSheet("receivers")}
+                className="h-9 shrink-0 rounded bg-slate-950 ring-1 ring-slate-700 text-slate-500 text-[11px] font-black tracking-[0.25em] active:bg-slate-700 active:text-white"
+              >
+                + ADD PASSER
+              </button>
+            )}
           </div>
 
           <div className="flex gap-2 mt-2 shrink-0">
