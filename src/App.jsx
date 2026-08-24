@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 /*  matches — the device is the working copy, not the archive.         */
 /* ------------------------------------------------------------------ */
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const MIN_N = 4;
 const CUR_KEY = "servetarget:current";
 const ARCHIVE_KEY = "servetarget:archive";
@@ -179,6 +179,187 @@ function ExportSheet({ title, filename, text, onClose }) {
             className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700"
           >
             TRY DOWNLOAD
+          </button>
+          {msg && <p className="text-slate-400 text-sm">{msg}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------ shareable image ------------------------ */
+
+const HEX = {
+  bg: "#0f172a", panel: "#020617", white: "#ffffff",
+  slate400: "#94a3b8", slate500: "#64748b", slate700: "#334155", slate800: "#1e293b",
+  red500: "#ef4444", red600: "#dc2626", orange500: "#f97316", amber300: "#fcd34d",
+  green400: "#4ade80", green500: "#22c55e", blue400: "#60a5fa",
+};
+const avgHex = (a, n) => (n < MIN_N ? HEX.slate400 : a <= 1.9 ? HEX.red500 : a <= 2.35 ? HEX.amber300 : HEX.green400);
+const SEG_HEX = { ace: [HEX.red600, "#ffffff"], 1: [HEX.orange500, "#ffffff"], 2: [HEX.amber300, "#0f172a"], 3: [HEX.green500, "#0f172a"] };
+
+function buildReportImage({ title, subtitle, stats, totalPassed, targetJersey }) {
+  const W = 1400;
+  const rowH = 108, gap = 14, top = 210, bottom = 80;
+  const H = top + stats.length * (rowH + gap) - (stats.length ? gap : 0) + bottom;
+  const cv = document.createElement("canvas");
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext("2d");
+  const font = (w, s) => (ctx.font = `${w} ${s}px -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif`);
+  const rr = (x, y, w, h, r) => {
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, r);
+      ctx.fill();
+    } else ctx.fillRect(x, y, w, h);
+  };
+
+  ctx.fillStyle = HEX.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = HEX.blue400;
+  font(700, 22);
+  ctx.fillText("S E R V E   T A R G E T", 48, 60);
+  ctx.fillStyle = HEX.white;
+  font(900, 58);
+  ctx.fillText(title.length > 32 ? title.slice(0, 31) + "…" : title, 44, 126);
+  ctx.fillStyle = HEX.slate400;
+  font(600, 26);
+  ctx.fillText(subtitle, 46, 168);
+
+  const legend = [["3", "PERFECT"], ["2", "PLAYABLE"], ["1", "BROKEN"], ["ace", "ACE"]];
+  let lx = W - 48;
+  font(700, 22);
+  legend.forEach(([k]) => {
+    const label = k === "ace" ? "ACE" : k;
+    const tw = ctx.measureText(label).width;
+    lx -= tw;
+    ctx.fillStyle = HEX.slate400;
+    ctx.fillText(label, lx, 62);
+    lx -= 34;
+    ctx.fillStyle = SEG_HEX[k][0];
+    rr(lx, 42, 24, 24, 5);
+    lx -= 28;
+  });
+
+  stats.forEach((p, i) => {
+    const y = top + i * (rowH + gap);
+    const isTarget = targetJersey === p.jersey;
+    ctx.fillStyle = HEX.panel;
+    rr(40, y, W - 80, rowH, 12);
+    if (isTarget) {
+      ctx.strokeStyle = HEX.white;
+      ctx.lineWidth = 4;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(42, y + 2, W - 84, rowH - 4, 11);
+        ctx.stroke();
+      } else ctx.strokeRect(42, y + 2, W - 84, rowH - 4);
+    }
+
+    ctx.fillStyle = HEX.white;
+    font(900, 62);
+    ctx.textAlign = "center";
+    ctx.fillText(p.jersey, 130, y + (isTarget ? 62 : 72));
+    if (isTarget) {
+      ctx.fillStyle = HEX.red600;
+      rr(85, y + 74, 90, 26, 6);
+      ctx.fillStyle = HEX.white;
+      font(900, 17);
+      ctx.fillText("TARGET", 130, y + 93);
+    }
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = avgHex(p.avg, p.n);
+    font(900, 58);
+    ctx.fillText(fmt(p.avg), 220, y + 66);
+    ctx.fillStyle = HEX.slate500;
+    font(600, 22);
+    const share = totalPassed ? Math.round((p.n / totalPassed) * 100) : 0;
+    ctx.fillText(`${p.n} passes · ${share}% of serves${p.n < MIN_N ? " · thin" : ""}`, 222, y + 96);
+
+    const bx = 480, bw = W - bx - 70, by = y + 26, bh = 56;
+    ctx.fillStyle = HEX.slate800;
+    rr(bx, by, bw, bh, 8);
+    let sx = bx;
+    ["ace", 1, 2, 3].forEach((k) => {
+      if (!p.counts[k]) return;
+      const w = (p.counts[k] / p.n) * bw;
+      ctx.fillStyle = SEG_HEX[k][0];
+      ctx.fillRect(sx, by, w, bh);
+      if (w >= 36) {
+        ctx.fillStyle = SEG_HEX[k][1];
+        font(900, 26);
+        ctx.textAlign = "center";
+        ctx.fillText(String(p.counts[k]), sx + w / 2, by + 37);
+        ctx.textAlign = "left";
+      }
+      sx += w;
+    });
+  });
+
+  ctx.fillStyle = HEX.slate700;
+  font(600, 20);
+  ctx.fillText("Worst passer at the top — red average = your serving target.", 48, H - 34);
+
+  return cv;
+}
+
+function ImageSheet({ dataUrl, blob, filename, onClose }) {
+  const [msg, setMsg] = useState("");
+  const file = blob ? new File([blob], filename, { type: "image/png" }) : null;
+  const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
+
+  return (
+    <div className="fixed inset-0 bg-slate-950 bg-opacity-95 z-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-3xl bg-slate-900 ring-1 ring-slate-700 rounded-lg p-5 flex flex-col max-h-full">
+        <div className="flex items-baseline justify-between mb-1">
+          <p className="text-[10px] tracking-[0.3em] text-blue-400 font-bold">SHARE THIS REPORT</p>
+          <button onClick={onClose} className="text-slate-400 text-sm tracking-[0.2em] font-bold px-2">
+            CLOSE
+          </button>
+        </div>
+        <p className="text-slate-400 text-sm mb-3">
+          Press and hold the image, then <span className="text-white font-bold">Save to Photos</span> or <span className="text-white font-bold">Share</span> — or use the buttons below.
+        </p>
+
+        <div className="flex-1 min-h-0 overflow-auto mb-3">
+          <img src={dataUrl} alt="Passer report" className="w-full rounded ring-1 ring-slate-700" />
+        </div>
+
+        <div className="flex gap-2 items-center flex-wrap">
+          {canShare && (
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.share({ files: [file] });
+                } catch {
+                  /* user cancelled the share sheet */
+                }
+              }}
+              className="rounded bg-blue-600 font-black tracking-wide px-6 py-3 active:bg-blue-500"
+            >
+              SHARE / SAVE…
+            </button>
+          )}
+          <button
+            onClick={() => {
+              try {
+                const a = document.createElement("a");
+                a.href = dataUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setMsg("Download started.");
+              } catch {
+                setMsg("Download blocked here — press and hold the image instead.");
+              }
+            }}
+            className="rounded bg-slate-800 ring-1 ring-slate-600 font-black tracking-wide px-6 py-3 active:bg-slate-700"
+          >
+            DOWNLOAD
           </button>
           {msg && <p className="text-slate-400 text-sm">{msg}</p>}
         </div>
@@ -364,6 +545,15 @@ export default function App() {
   const [flash, setFlash] = useState(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [exporting, setExporting] = useState(null);
+  const [sharing, setSharing] = useState(null);
+
+  function openImageShare({ title, subtitle, serves: list, receivers: recs, targetJersey, filename }) {
+    const stats = statsFor(list, recs);
+    if (!stats.length) return;
+    const cv = buildReportImage({ title, subtitle, stats, totalPassed: list.filter((s) => s.rating !== "err").length, targetJersey });
+    const dataUrl = cv.toDataURL("image/png");
+    cv.toBlob((blob) => setSharing({ dataUrl, blob, filename }), "image/png");
+  }
 
   const [saveState, setSaveState] = useState("clean");
   const [storageOff, setStorageOff] = useState(false);
@@ -579,6 +769,7 @@ export default function App() {
   if (!loaded) return <div className="min-h-screen bg-slate-900 text-slate-500 flex items-center justify-center">Loading…</div>;
 
   const exportSheet = exporting ? <ExportSheet {...exporting} onClose={() => setExporting(null)} /> : null;
+  const imageSheet = sharing ? <ImageSheet {...sharing} onClose={() => setSharing(null)} /> : null;
 
   /* ============================== HOME ============================== */
 
@@ -733,6 +924,23 @@ export default function App() {
           >
             EXPORT
           </button>
+          <button
+            onClick={() =>
+              openImageShare({
+                title: viewing.opponent.toUpperCase(),
+                subtitle: combined
+                  ? `${related.length} meetings · ${rServes.length} serves total`
+                  : `${prettyDate(viewing.date)} · ${viewing.sets} sets · ${viewing.serves.length} serves`,
+                serves: rServes,
+                receivers: rReceivers,
+                targetJersey: top && top.jersey,
+                filename: `serve-target-${viewing.opponent.replace(/\s+/g, "-").toLowerCase()}${combined ? "-combined" : ""}.png`,
+              })
+            }
+            className="rounded bg-blue-600 font-black tracking-wide px-4 py-2 text-sm active:bg-blue-500"
+          >
+            IMAGE
+          </button>
         </div>
 
         {related.length > 1 && (
@@ -774,6 +982,7 @@ export default function App() {
           note={combined ? "Every meeting combined — the fullest read on them you have." : "Full match. Red is a passer breaking down."}
         />
         {exportSheet}
+        {imageSheet}
       </div>
     );
   }
